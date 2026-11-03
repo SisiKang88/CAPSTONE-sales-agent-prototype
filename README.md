@@ -1,4 +1,4 @@
-# 📈 Sales Insights Assistant
+git init# 📈 Sales Insights Assistant
 
 A Streamlit app that helps a sales rep prepare for a deal. The rep enters details about the product they sell, the company they are targeting, the competition and the person they want to sell to. The app enriches those inputs (company metadata, optional product deck) and sends them to an LLM, which returns structured sales insights: positioning, talking points, discovery questions and a draft outreach email.
 
@@ -22,9 +22,11 @@ The inputs are fully dynamic, so you can pick any product you like (software, ap
 
 ```
 .
-├── sales_insights_app.py   # Streamlit front-end + backend logic
+├── sales_insights_app.deepseek.py   # Streamlit front-end + backend logic
 ├── sales_insights.json     # Example output produced by the app
-└── README.md
+└── README.md├── sales_insights.json     # Example output produced by the app
+└── requirement.txt     # required library tool for the app
+└── .gitignore.txt  
 ```
 
 ---
@@ -47,22 +49,32 @@ The inputs are fully dynamic, so you can pick any product you like (software, ap
 
 ```
 Sales rep fills form
-        │
-        ▼
+         │
+         ▼
  Input validation (required fields, URL format)
-        │
-        ▼
+         │
+         ▼
  Company enrichment ── derive company ID + scrape title/description
-        │               (target company and each competitor)
-        ▼
+         │               (target company and each competitor)
+         ▼
  Document parsing ──── extract text from the optional upload
-        │               (capped at 12,000 characters)
-        ▼
- Prompt builder ────── combines everything into one prompt
-        │
-        ▼
- LLM call ──────────── returns structured JSON
-        │
+         │               (capped at 12,000 characters)
+         ▼
+ ================== MULTI-AGENT ORCHESTRATION ==================
+         │
+         ├──▶ 1. Research Agent ──── (Analyzes company & docs)
+         │           │
+         ├──▶ 2. Competitor Agent ── (Evaluates rival URLs)
+         │           │
+         ├──▶ 3. Persona Agent ───── (Profiles the target buyer)
+         │           │
+         ▼           ▼
+ 4. Orchestrator / Lead Strategist
+ (Synthesizes reports from Agents 1, 2, & 3 to draft final strategy)
+ ===============================================================
+         │
+         ▼
+ Returns combined structured JSON for UI rendering
         ▼
  Rendered insights + email draft + JSON download
 ```

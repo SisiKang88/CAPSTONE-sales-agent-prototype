@@ -126,82 +126,82 @@ def extract_text_from_upload(uploaded_file) -> str:
 # ----------------------------------------------------------------------------
 # LLM back-end
 # ----------------------------------------------------------------------------
-SYSTEM_PROMPT = """You are an expert B2B sales strategist. Given details about a product,
-a target company, competitors and a target buyer, produce practical, specific sales
-insights. Respond with ONLY valid JSON (no markdown fences, no preamble) using this schema:
 
-{
-  "product_category": "short category label inferred from the product info",
-  "product_summary": "2-3 sentence summary of the product (use the overview document if given)",
-  "key_features": ["..."],
-  "target_company_snapshot": "what the target company likely does and where this product could fit",
-  "buyer_persona": {"likely_priorities": ["..."], "likely_objections": ["..."]},
-  "competitive_positioning": [{"competitor": "...", "their_angle": "...", "how_to_differentiate": "..."}],
-  "talking_points": ["..."],
-  "discovery_questions": ["..."],
-  "outreach_email": {"subject": "...", "body": "..."}
-}
-
-Be concrete and avoid generic filler. If you are unsure about a fact regarding a company,
-say so rather than inventing details."""
-
-
-def build_user_prompt(inputs: dict) -> str:
-    competitor_block = (
-        "\n".join(
-            f"- {c['company_id']} ({c['url']}) | title: {c.get('title') or 'n/a'} | "
-            f"description: {c.get('description') or 'n/a'}"
-            for c in inputs["competitors"]
-        )
-        or "None provided"
-    )
-    target = inputs["company"]
-    doc_block = inputs["document_text"][:MAX_DOC_CHARS] or "None provided"
-
-    return f"""PRODUCT NAME: {inputs['product_name']}
-PRODUCT CATEGORY (as entered by rep, may be blank or a sentence): {inputs['product_category'] or 'Not provided - infer it'}
-VALUE PROPOSITION: {inputs['value_prop']}
-
-TARGET COMPANY:
-- company_id: {target['company_id']}
-- url: {target['url']}
-- page title: {target.get('title') or 'n/a'}
-- page description: {target.get('description') or 'n/a'}
-
-TARGET CUSTOMER (person to sell to): {inputs['target_customer']}
-
-COMPETITORS:
-{competitor_block}
-
-PRODUCT OVERVIEW DOCUMENT (extracted text):
-{doc_block}
-"""
-
-
-def call_llm(inputs: dict) -> dict:
+def call_multi_agent_system(inputs: dict) -> dict:
     from openai import OpenAI
-
+    
     api_key = os.getenv("DEEPSEEK_API_KEY") or st.session_state.get("api_key")
     if not api_key:
         raise RuntimeError("No API key found. Set DEEPSEEK_API_KEY or enter it in the sidebar.")
 
-    # DeepSeek's API is OpenAI-compatible, so we reuse the openai package
     client = OpenAI(api_key=api_key, base_url=DEEPSEEK_BASE_URL)
-    response = client.chat.completions.create(
-        model=MODEL_NAME,
-        max_tokens=2500,
-        temperature=0.4,
-        response_format={"type": "json_object"},  # forces valid JSON output
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": build_user_prompt(inputs)},
-        ],
+    
+    # ---------------------------------------------------------
+    # Agent 1: Company Research Agent (公司研究员)
+    # ---------------------------------------------------------
+    st.toast("🕵️ Research Agent is analyzing the company...")
+    research_prompt = f"Product: {inputs['product_name']}\nCompany Info: {inputs['company']}\nDocument: {inputs['document_text'][:8000]}"
+    research_sys = "You are a B2B Company Research Agent. Output ONLY JSON with keys: 'product_category', 'product_summary', 'key_features', 'target_company_snapshot'."
+    
+    res_1 = client.chat.completions.create(
+        model=MODEL_NAME, response_format={"type": "json_object"},
+        messages=[{"role": "system", "content": research_sys}, {"role": "user", "content": research_prompt}]
     )
-    raw = response.choices[0].message.content or ""
-    raw = re.sub(r"^```(?:json)?|```$", "", raw.strip(), flags=re.M).strip()
-    return json.loads(raw)
+    research_data = json.loads(res_1.choices[0].message.content)
 
+    # ---------------------------------------------------------
+    # Agent 2: Competitor Analysis Agent (竞争分析师)
+    # ---------------------------------------------------------
+    st.toast("⚔️ Competitor Agent is evaluating rivals...")
+    comp_prompt = f"Product: {inputs['product_name']}\nValue Prop: {inputs['value_prop']}\nCompetitors: {inputs['competitors']}"
+    comp_sys = "You are a Competitor Analysis Agent. Output ONLY JSON with key 'competitive_positioning' (a list of dicts with keys: 'competitor', 'their_angle', 'how_to_differentiate'). If unsure, say 'Data unavailable'."
+    
+    res_2 = client.chat.completions.create(
+        model=MODEL_NAME, response_format={"type": "json_object"},
+        messages=[{"role": "system", "content": comp_sys}, {"role": "user", "content": comp_prompt}]
+    )
+    comp_data = json.loads(res_2.choices[0].message.content)
 
+    # ---------------------------------------------------------
+    # Agent 3: Buyer Persona Agent (心理画像师)
+    # ---------------------------------------------------------
+    st.toast("👤 Persona Agent is profiling the buyer...")
+    persona_prompt = f"Target Customer: {inputs['target_customer']}\nProduct Value: {inputs['value_prop']}"
+    persona_sys = "You are a Buyer Persona Agent. Output ONLY JSON with key 'buyer_persona' containing lists for 'likely_priorities' and 'likely_objections'."
+    
+    res_3 = client.chat.completions.create(
+        model=MODEL_NAME, response_format={"type": "json_object"},
+        messages=[{"role": "system", "content": persona_sys}, {"role": "user", "content": persona_prompt}]
+    )
+    persona_data = json.loads(res_3.choices[0].message.content)
+
+    # ---------------------------------------------------------
+    # Agent 4: Orchestrator / Lead Strategist (销售总监)
+    # ---------------------------------------------------------
+    st.toast("🧠 Orchestrator is drafting the final strategy...")
+    orchestrator_prompt = f"""
+    Research Report: {json.dumps(research_data)}
+    Competitor Report: {json.dumps(comp_data)}
+    Persona Report: {json.dumps(persona_data)}
+    """
+    orchestrator_sys = "You are the Lead Sales Orchestrator. Using the provided agent reports, output ONLY JSON with keys: 'talking_points', 'discovery_questions', and 'outreach_email' (which is a dict with 'subject' and 'body')."
+    
+    res_4 = client.chat.completions.create(
+        model=MODEL_NAME, response_format={"type": "json_object"},
+        messages=[{"role": "system", "content": orchestrator_sys}, {"role": "user", "content": orchestrator_prompt}]
+    )
+    orchestrator_data = json.loads(res_4.choices[0].message.content)
+
+    # ---------------------------------------------------------
+    # Combine all agent outputs for the UI
+    # ---------------------------------------------------------
+    final_result = {
+        **research_data,
+        **comp_data,
+        **persona_data,
+        **orchestrator_data
+    }
+    return final_result
 # ----------------------------------------------------------------------------
 # Rendering
 # ----------------------------------------------------------------------------
@@ -372,7 +372,7 @@ def main():
 
     with st.spinner("Generating insights with the LLM..."):
         try:
-            result = call_llm(inputs)
+            result = call_multi_agent_system(inputs)
         except json.JSONDecodeError:
             st.error("The LLM returned a response that couldn't be parsed. Please try again.")
             return
